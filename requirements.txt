@@ -1,7 +1,5 @@
 flask
 pdfplumber
-pytesseract
-pdf2image
 pandas
 openpyxl
 gunicorn
