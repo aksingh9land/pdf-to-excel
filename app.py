@@ -1,6 +1,7 @@
 import os
 import pdfplumber
 import pandas as pd
+import threading
 import uuid  # Import UUID to generate unique file names
 from flask import Flask, request, send_file, jsonify, session
 from flask_session import Session  # For user session management
@@ -42,19 +43,31 @@ def upload_pdf():
 
 @app.route("/download/excel", methods=["GET"])
 def download_excel():
-    if "file_id" not in session:
-        return jsonify({"error": "No file found for this session"}), 404
+    file_id = request.cookies.get("file_id")  # Get file_id from cookie
 
-    file_id = session["file_id"]
+    if not file_id:
+        print("⚠️ No file_id found in cookies!")
+        return jsonify({"error": "No file found"}), 404
+
     excel_file = os.path.join(OUTPUT_FOLDER, f"{file_id}.xlsx")
 
     if os.path.exists(excel_file):
-        response = send_file(excel_file, as_attachment=True)
+        print("✅ File found:", excel_file)
         
-        # Delete the file after downloading
-        os.remove(excel_file)
+        # Create response with file
+        response = send_file(excel_file, as_attachment=True)
+
+        # Schedule file deletion after response is sent
+        def delete_file():
+            print(f"🗑️ Deleting file: {excel_file}")
+            os.remove(excel_file)
+
+        # Run delete file function after 5 seconds (to allow browser time to download)
+        threading.Timer(5, delete_file).start()
+
         return response
     else:
+        print("❌ File not found:", excel_file)
         return jsonify({"error": "File not found"}), 404
 
 def pdf_to_excel(pdf_path, output_excel):
