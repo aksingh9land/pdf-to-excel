@@ -31,7 +31,12 @@ def upload_pdf():
 def download_excel():
     excel_file = os.path.join(OUTPUT_FOLDER, "output.xlsx")
     if os.path.exists(excel_file):
-        return send_file(excel_file, as_attachment=True)
+        response = send_file(excel_file, as_attachment=True)
+
+        # Remove the file after sending the response
+        os.remove(excel_file)
+
+        return response
     else:
         return jsonify({"error": "File not found"}), 404
 
