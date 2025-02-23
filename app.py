@@ -4,6 +4,7 @@ import pytesseract
 import pdf2image
 import pandas as pd
 from flask import Flask, request, send_file, jsonify
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -22,19 +23,26 @@ def upload_pdf():
     filename = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(filename)
 
-    # Extract text from PDF
+    # Check file type
+    if file.filename.lower().endswith(".pdf"):
+        extracted_text = extract_text_from_pdf(filename)
+    elif file.filename.lower().endswith((".png", ".jpg", ".jpeg")):
+        extracted_text = extract_text_from_image(filename)
+    else:
+        return jsonify({"error": "Unsupported file format"}), 400
+
+    # Save extracted text as a file
     text_file = os.path.join(OUTPUT_FOLDER, "output.txt")
-    extracted_text = extract_text_from_pdf(filename)
     with open(text_file, "w", encoding="utf-8") as f:
         f.write(extracted_text)
 
-    # Convert PDF tables to Excel
+    # Convert extracted text into Excel
     excel_file = os.path.join(OUTPUT_FOLDER, "output.xlsx")
-    pdf_to_excel(filename, excel_file)
+    convert_text_to_excel(extracted_text, excel_file)
 
     return jsonify({
-        "text_download_url": f"https://pdf-to-excel-xpfz.onrender.com/download/text",
-        "excel_download_url": f"https://pdf-to-excel-xpfz.onrender.com/download/excel"
+        "text_download_url": "https://pdf-to-excel-xpfz.onrender.com/download/text",
+        "excel_download_url": "https://pdf-to-excel-xpfz.onrender.com/download/excel"
     })
 
 @app.route("/download/text", methods=["GET"])
@@ -57,19 +65,28 @@ def extract_text_from_pdf(pdf_path):
     text = ""
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            text += page.extract_text() + "\n"
-    return text
+            page_text = page.extract_text()
+            if page_text:  # If text is found, use it
+                text += page_text + "\n"
+            else:  # If no text is found, use OCR
+                text += extract_text_from_image(pdf_path) + "\n"
+    return text.strip()
 
-def pdf_to_excel(pdf_path, output_excel):
-    data = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                for row in table:
-                    data.append(row)
+def extract_text_from_image(image_path):
+    # If it's a PDF, convert it to images
+    if image_path.lower().endswith(".pdf"):
+        images = pdf2image.convert_from_path(image_path)
+    else:
+        images = [Image.open(image_path)]
 
-    df = pd.DataFrame(data)
+    extracted_text = ""
+    for img in images:
+        extracted_text += pytesseract.image_to_string(img) + "\n"
+    return extracted_text.strip()
+
+def convert_text_to_excel(text, output_excel):
+    lines = text.split("\n")
+    df = pd.DataFrame({"Extracted Text": lines})
     df.to_excel(output_excel, index=False)
 
 if __name__ == "__main__":
