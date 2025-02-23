@@ -3,84 +3,74 @@ import pdfplumber
 import pytesseract
 import pdf2image
 import pandas as pd
-from flask import Flask, request, jsonify, send_file
-from werkzeug.utils import secure_filename
+from flask import Flask, request, send_file, jsonify
 
-# Set up Flask app
 app = Flask(__name__)
+
+# Define folders
 UPLOAD_FOLDER = "uploads"
-RESULTS_FOLDER = "results"
+OUTPUT_FOLDER = "outputs"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULTS_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Tesseract Path (change this if needed)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-
-# PDF to Text (OCR)
-def ocr_pdf(pdf_path):
-    images = pdf2image.convert_from_path(pdf_path)
-    extracted_text = ""
-    for img in images:
-        extracted_text += pytesseract.image_to_string(img, lang="eng") + "\n"
-    return extracted_text.strip()
-
-# PDF to Excel
-def pdf_to_excel(pdf_path, output_excel):
-    with pdfplumber.open(pdf_path) as pdf:
-        all_tables = []
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                df = pd.DataFrame(table)
-                all_tables.append(df)
-        
-        if all_tables:
-            final_df = pd.concat(all_tables, ignore_index=True)
-            final_df.to_excel(output_excel, index=False)
-            return True
-    return False
-
-# Upload API
 @app.route("/upload", methods=["POST"])
-def upload_file():
+def upload_pdf():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
+    filename = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(filename)
 
-    filename = secure_filename(file.filename)
-    pdf_path = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(pdf_path)
-
-    # OCR & Excel Processing
-    text_output = os.path.join(RESULTS_FOLDER, f"{filename}_text.txt")
-    excel_output = os.path.join(RESULTS_FOLDER, f"{filename}.xlsx")
-
-    extracted_text = ocr_pdf(pdf_path)
-    with open(text_output, "w", encoding="utf-8") as f:
+    # Extract text from PDF
+    text_file = os.path.join(OUTPUT_FOLDER, "output.txt")
+    extracted_text = extract_text_from_pdf(filename)
+    with open(text_file, "w", encoding="utf-8") as f:
         f.write(extracted_text)
 
-    excel_success = pdf_to_excel(pdf_path, excel_output)
+    # Convert PDF tables to Excel
+    excel_file = os.path.join(OUTPUT_FOLDER, "output.xlsx")
+    pdf_to_excel(filename, excel_file)
 
-    response_data = {
-        "message": "File processed successfully",
-        "text_download_url": f"/download/text/{filename}_text.txt",
-        "excel_download_url": f"/download/excel/{filename}.xlsx" if excel_success else None
-    }
-    return jsonify(response_data)
+    return jsonify({
+        "text_download_url": f"https://pdf-to-excel-xpfz.onrender.com/download/text",
+        "excel_download_url": f"https://pdf-to-excel-xpfz.onrender.com/download/excel"
+    })
 
-# Download OCR Text
-@app.route("/download/text/<filename>", methods=["GET"])
-def download_text(filename):
-    return send_file(os.path.join(RESULTS_FOLDER, filename), as_attachment=True)
+@app.route("/download/text", methods=["GET"])
+def download_text():
+    text_file = os.path.join(OUTPUT_FOLDER, "output.txt")
+    if os.path.exists(text_file):
+        return send_file(text_file, as_attachment=True)
+    else:
+        return jsonify({"error": "File not found"}), 404
 
-# Download Excel File
-@app.route("/download/excel/<filename>", methods=["GET"])
-def download_excel(filename):
-    return send_file(os.path.join(RESULTS_FOLDER, filename), as_attachment=True)
+@app.route("/download/excel", methods=["GET"])
+def download_excel():
+    excel_file = os.path.join(OUTPUT_FOLDER, "output.xlsx")
+    if os.path.exists(excel_file):
+        return send_file(excel_file, as_attachment=True)
+    else:
+        return jsonify({"error": "File not found"}), 404
 
-# Run App
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text += page.extract_text() + "\n"
+    return text
+
+def pdf_to_excel(pdf_path, output_excel):
+    data = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for table in tables:
+                for row in table:
+                    data.append(row)
+
+    df = pd.DataFrame(data)
+    df.to_excel(output_excel, index=False)
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)
